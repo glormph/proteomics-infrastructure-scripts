@@ -69,7 +69,7 @@ def get_logs(currentdate, yesterday):
                 with open(logfile) as fp:
                     for line in fp:
                         if line.strip():
-                            machine_log.append( line.strip() )
+                            machine_log.append( '{0}--{1}'.format(date_of_log, line.strip()) )
                     log.info('Opened logfile for {0}, accumulated {1} lines.'.format(date_of_log, len(machine_log)))
             except IOError:
                 log.warning('Cannot open logfile for {0}, try {1}/10'.format(date_of_log, tries) )
@@ -87,48 +87,51 @@ def get_logs(currentdate, yesterday):
 def process_queue(machine_log, queue, currentdate):
     """Loop through log and put files in correct queues.
     """
-    # At the end of the loop, the correct file will be in the open queue.
-    current_filename = None # the file we are currently treating
+    current_file, current_time = None, None
     for logline in machine_log:
-        logline = logline.split('  ')[1]
-        if logline == 'Closed raw file':
-            if current_filename:
-                if queue[current_filename]['status'] == 'open':
-                    queue[current_filename]['status'] = 'closed'
-                    queue[current_filename]['date'] = currentdate
-            else: # check if there is an open file from the previous day's log,
-                  # shouldn't happen since we're checking two days.
-                for fn in queue:
-                    if queue[fn]['status'] == 'open':
-                        queue[fn]['status'] = 'closed'
-                        queue[fn]['date'] = currentdate
-            current_filename = None
-        
-        elif 'Raw file created' in logline:
-            current_filename = logline.split('=')[1].strip()
-            if current_filename not in queue or queue[current_filename]['status'] != 'done':
-                queue[current_filename] = {'status': 'open', 'date': currentdate}
-            
-    # remove old files from 'done' queue. Old: > 3 days.
+        logline = logline.split(':  ')
+        timestamp = logline[0]
+        logdate = timestamp.split()[0]
+        logtext = logline[1]
+        if logtext == 'Closed raw file':
+            if current_file and current_time:
+                queue[current_time]['status'] = 'closed'
+                queue[current_time]['closed'] = logdate
+            elif machine_log.index(':  '.join(logline)) == 0 and logdate == currentdate:
+                log.warning('File closing encountered, but no files seem to be open. Date--time: {0}'.format(timestamp))
+            elif logdate != currentdate:
+                log.info('First line in yesterdays log was a file closing.')
+            current_file = None
+            current_time = None
+    
+        elif 'Raw file created' in logtext:
+            if current_time not in queue: 
+                current_file = logtext.split('=')[1].strip()
+                current_time = timestamp
+                queue[current_time] = {'file': current_file, 'status': 'open',
+                'opened': logdate }
+
+    # remove old files from 'done' queue. Old: > MAX_DAYS_IN_QUEUE
     to_remove = []
-    for fn in queue:
-        if queue[fn]['status'] == 'done':
-            olddate = datetime.datetime.strptime(queue[fn]['date'], DATEFORMAT)
+    for timestamp in queue:
+        if queue[timestamp]['status'] == 'done':
+            olddate = datetime.datetime.strptime(queue[timestamp]['transferred'], DATEFORMAT)
             if olddate < datetime.datetime.strptime(currentdate, DATEFORMAT) - datetime.timedelta(MAX_DAYS_IN_QUEUE):
-                to_remove.append(fn)
-    for fn in to_remove:
-        del(queue[fn])
+                to_remove.append(timestamp)
+    for ts in to_remove:
+        del(queue[ts])
         log.info('Removed old file with date {0} from the done queue.'.format(olddate))
     return queue
 
 
 def transfer_files(queue, currentdate):
     transferred = False
-    for fn in queue:
-        if queue[fn]['status'] == 'closed':
+    for timestamp in queue:
+        fn = queue[timestamp]['file']
+        if queue[timestamp]['status'] == 'closed':
             if not os.path.exists(fn):
                 log.warning('Closed file {0} not found on local computer. Removed from queue.'.format(fn) )
-                queue[fn]['status'] = 'done'
+                queue[timestamp]['status'] = 'done'
                 continue
             try:
                 subprocess.check_call(['C:\Program Files\ssh\pscp.exe', '-i', 'C:\Program Files\ssh\keys\orbi.ppk', fn, 'orbi@130.229.48.246:/mnt/incoming/'])
@@ -140,8 +143,8 @@ def transfer_files(queue, currentdate):
             else:
                 transferred = True
                 log.info('File {0} copied to remote server.'.format(fn) )
-                queue[fn]['status'] = 'done'
-                queue[fn]['date'] = currentdate
+                queue[timestamp]['status'] = 'done'
+                queue[timestamp]['transferred'] = currentdate
     
     if not transferred:
         log.info('No files currently ready for transfer.')
