@@ -19,13 +19,16 @@ log.addHandler(ch)
 # initialize
 PATH_TO_LOG = os.path.join('C:\\', 'Thermo', 'Instruments', 'LTQ', 'system', 'logs')
 DATEFORMAT = '%Y%m%d'
+MAX_DAYS_IN_QUEUE = 5
+
 
 def main(interval):
     log.info('Started automatic file transfer for LTQ Orbitrap Velos.')
     while True:
         currentdate = datetime.datetime.now().strftime(DATEFORMAT)
+        yesterday = (datetime.datetime.now() - datetime.timedelta(1)).strftime(DATEFORMAT)
         queue = get_queue()
-        machine_log = get_logs(currentdate)
+        machine_log = get_logs(currentdate, yesterday)
         if machine_log:
             queue = process_queue(machine_log, queue, currentdate)
             queue = transfer_files(queue, currentdate)
@@ -54,25 +57,30 @@ def get_queue():
         return queue
 
 
-def get_logs(currentdate):
-    """open today's logfile"""
-    current_logfile = os.path.join(PATH_TO_LOG, 'LTQ_{0}.LOG'.format(currentdate) )
+def get_logs(currentdate, yesterday):
+    """read today and yesterday's logfile"""
+    
     machine_log = []
-    for tries in range(11):
-        try:
-            with open(current_logfile) as fp:
-                for line in fp:
-                    if line.strip():
-                        machine_log.append( line.strip() )
-                log.info('Opened logfile for {0}, read {1} lines.'.format(currentdate, len(machine_log)))
-        except IOError:
-            log.warning('Cannot open logfile for {0}, try {1}/10'.format(currentdate, tries) )
-            if tries == 10:
-                machine_log = False
+    for date_of_log in [yesterday, currentdate]:
+        logfile = os.path.join(PATH_TO_LOG, 'LTQ_{0}.LOG'.format(date_of_log) )
+
+        for tries in range(11):
+            try:
+                with open(logfile) as fp:
+                    for line in fp:
+                        if line.strip():
+                            machine_log.append( line.strip() )
+                    log.info('Opened logfile for {0}, accumulated {1} lines.'.format(date_of_log, len(machine_log)))
+            except IOError:
+                log.warning('Cannot open logfile for {0}, try {1}/10'.format(date_of_log, tries) )
+                if tries == 10 and date_of_log == currentdate:
+                    machine_log = False # no log today yet
+                elif tries == 10 and date_of_log == yesterday:
+                    break # there is no log from yesterday, machine may be new
+                else:
+                    time.sleep(10)
             else:
-                time.sleep(10)
-        else:
-            break
+                break
     return machine_log
 
 
@@ -88,7 +96,8 @@ def process_queue(machine_log, queue, currentdate):
                 if queue[current_filename]['status'] == 'open':
                     queue[current_filename]['status'] = 'closed'
                     queue[current_filename]['date'] = currentdate
-            else: # check if there is an open file from the previous day's log
+            else: # check if there is an open file from the previous day's log,
+                  # shouldn't happen since we're checking two days.
                 for fn in queue:
                     if queue[fn]['status'] == 'open':
                         queue[fn]['status'] = 'closed'
@@ -105,7 +114,7 @@ def process_queue(machine_log, queue, currentdate):
     for fn in queue:
         if queue[fn]['status'] == 'done':
             olddate = datetime.datetime.strptime(queue[fn]['date'], DATEFORMAT)
-            if olddate < datetime.datetime.strptime(currentdate, DATEFORMAT) - datetime.timedelta(3):
+            if olddate < datetime.datetime.strptime(currentdate, DATEFORMAT) - datetime.timedelta(MAX_DAYS_IN_QUEUE):
                 to_remove.append(fn)
     for fn in to_remove:
         del(queue[fn])
