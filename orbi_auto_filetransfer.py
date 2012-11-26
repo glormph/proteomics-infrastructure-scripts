@@ -91,25 +91,28 @@ def process_queue(machine_log, queue, currentdate):
     for logline in machine_log:
         logline = logline.split(':  ')
         timestamp = logline[0]
-        logdate = timestamp.split()[0]
+        logdate = timestamp.split('--')[0]
         logtext = logline[1]
         if logtext == 'Closed raw file':
             if current_file and current_time:
                 queue[current_time]['status'] = 'closed'
                 queue[current_time]['closed'] = logdate
             elif machine_log.index(':  '.join(logline)) == 0 and logdate == currentdate:
-                log.warning('File closing encountered, but no files seem to be open. Date--time: {0}'.format(timestamp))
-            elif logdate != currentdate:
+                log.warning('First line in todays log is a file closing, but no log files for yesterday found. Date--time: {0}'.format(timestamp))
+            elif machine_log.index(':  '.join(logline)) == 0 and logdate != currentdate:
                 log.info('First line in yesterdays log was a file closing.')
             current_file = None
             current_time = None
     
         elif 'Raw file created' in logtext:
-            if current_time not in queue: 
+            if timestamp not in queue: 
                 current_file = logtext.split('=')[1].strip()
                 current_time = timestamp
                 queue[current_time] = {'file': current_file, 'status': 'open',
                 'opened': logdate }
+            elif queue[timestamp]['status'] == 'open':
+                current_file = logtext.split('=')[1].strip()
+                current_time = timestamp
 
     # remove old files from 'done' queue. Old: > MAX_DAYS_IN_QUEUE
     to_remove = []
