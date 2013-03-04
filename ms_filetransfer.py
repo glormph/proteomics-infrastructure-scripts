@@ -115,10 +115,8 @@ class BaseFileTransferrer(object):
 
     def save_timestamps(self):
         ts = {
-            'last_opened': datetime.datetime.strftime( \
-                self.lastopened_timestamp, '%Y%m%d %H:%M:%S.%f'),
-            'last_closed': datetime.datetime.strftime( \
-                self.lastclosed_timestamp, '%Y%m%d %H:%M:%S.%f')
+            'last_opened': self.lastopened_timestamp.strftime('%Y%m%d %H:%M:%S.%f'),
+            'last_closed': self.lastclosed_timestamp.strftime('%Y%m%d %H:%M:%S.%f')
             }
         try:
             with open('logrec.txt', 'w') as fp:
@@ -130,8 +128,12 @@ class BaseFileTransferrer(object):
             log.info('Read last checked logtime')
     
     def put_log_in_queue(self):
+        """Updates file status in queue, open/closed -> ready for transfer.
+        Current behaviour treats each opening timestamp individually. Finding
+        files with identical names will lead to overwriting them."""
+
         for timestamp, logline in self.machine_log:
-            if self.start in logline:
+            if self.acquisition_start in logline:
                 age = datetime.datetime.now() - timestamp
                 if age.days < MAX_DAYS_IN_QUEUE:
                     fn = self.get_filename_from_logline(logline)
@@ -141,19 +143,20 @@ class BaseFileTransferrer(object):
                         self.update_queue_entry(timestamp, status='open',
                                 openeddate=timestamp.date())
 
-            elif self.stop in logline:
+            elif self.acquisition_stop in logline:
                 if self.lastopened_timestamp in self.queue and \
                         self.queue[self.lastopened_timestamp]['status'] == 'open':
                     self.update_queue_entry(timestamp, status='acquisition '
-                            'stop', stoppeddate=timestamp.date() )
-
-            elif self.store in logline:
-                # if there is a file for which acq has stopped, it is closed
-                # here, I think
-                if self.lastopened_timestamp in self.queue and \
-                        self.queue[self.lastopened_timestamp]['status'] == 'acquisition stop':
-                    self.update_queue_entry(timestamp, status='closed', closeddate=timestamp.date() )
+                            'closed', stoppeddate=timestamp.date() )
                     self.set_lastclosed_timestamp(timestamp)
+                
+                else:
+                    if not timestamp in self.machine_log[0]:
+                        log.warning('Closing of file detected, but not no open file in queue. '
+                            'Possible problem, check with administrator.')
+                    else:
+                        log.warning('First line of logfile was file closing. '
+                                'Ignoring.')
 
     def transfer_files(self, queue, currentdate):
         transferred = False
@@ -189,9 +192,8 @@ class BaseFileTransferrer(object):
 class OrbiFileTransferrer(BaseFileTransferrer):
     def __init__(self, name, interval, logdir):
         super(OrbiFileTransferrer, self).__init__(name, interval, logdir)
-        self.start = 'Raw file created, actual name'
-        self.stop = 'Stopping acquisition -- this doesnt exist in orbi log'
-        self.store = 'Closed raw file'
+        self.acquisition_start = 'Raw file created, actual name'
+        self.acquisition_stop = 'Closed raw file'
         self.keyfile = keyfile
 
     def read_log(self):
@@ -237,9 +239,8 @@ class OrbiFileTransferrer(BaseFileTransferrer):
 class QExactiveFileTransferrer(BaseFileTransferrer):
     def __init__(self, name, interval, logdir):
         super(QExactiveFileTransferrer, self).__init__(name, interval, logdir)
-        self.start = 'Starting acquisition'
-        self.stop = 'Stopping acquisition'
-        self.store = 'Storing acquisition scan'
+        self.acquisition_start = 'Starting acquisition'
+        self.acquisition_stop = 'MS acquisition end. Accumulated MS size'
 
     def read_log(self):
         self.machine_log = []
