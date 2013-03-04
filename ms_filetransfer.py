@@ -1,4 +1,5 @@
 import os, datetime, subprocess, logging, json, time, glob
+import metadata_querying
 
 # prepare log
 log = logging.getLogger(__name__)
@@ -18,10 +19,13 @@ log.addHandler(ch)
 PATH_TO_LOG = os.path.join('C:\\', 'Thermo', 'Instruments', 'LTQ', 'system', 'logs')
 DATEFORMAT = '%Y%m%d'
 MAX_DAYS_IN_QUEUE = 5
+LOGIN = 'http://metadata.yourdomain.ex/kantele/login'
+URL = 'http://metadata.yourdomain.ex/kantele/rawstatus'
+
 keyfile = 'C:\Program Files\ssh\keys\orbi.ppk'
 
 class BaseFileTransferrer(object):
-    def __init__(self, name, interval, logdir):
+    def __init__(self, name, interval, logdir, keyfile):
         self.name = name
         self.interval = interval
         self.logdir = logdir
@@ -77,17 +81,23 @@ class BaseFileTransferrer(object):
         for k in kwargs:
             self.queue[timestamp][k] = kwargs[k]
         
-    def remove_old_from_queue(self):
+    def cleanup_old_files(self):
         # Remove old files from queue
-        to_remove = []
+        to_query = []
         for timestamp in self.queue:
             age = datetime.datetime.now() - self.queue[timestamp]['closedate']
             if self.queue[timestamp]['status'] == 'done' and age.days > MAX_DAYS_IN_QUEUE:
-                to_remove.append(timestamp)
+                to_query.append(timestamp)
+        
+        to_remove = self.check_files_metadata_archived(to_query)
+
         for timestamp in to_remove:
-            log.info('Removing old file with date {0} from the done '
-                    'queue.'.format(self.queue[timestamp]['closedate']))
+            log.info('Removing old file {0} with date {1} from queue and '
+                    'deleting from disk.'.format(self.queue[timestamp]['file'],
+                            self.queue[timestamp]['closedate']))
+            os.remove(self.queue[timestamp]['file'])
             del(self.queue[timestamp])
+
     
     def get_last_timestamps(self):
         try:
@@ -127,6 +137,16 @@ class BaseFileTransferrer(object):
         else:
             log.info('Read last checked logtime')
     
+    def check_files_metadata_archived(files):
+        archived_meta = []
+        response = metadata_querying.query_rawfiles(files, URL, LOGIN)
+        for fn in response:
+            if response[fn][0] == 'done':
+                archived_meta.append(fn)
+
+        return archived_meta
+        	 
+
     def put_log_in_queue(self):
         """Updates file status in queue, open/closed -> ready for transfer.
         Current behaviour treats each opening timestamp individually. Finding
@@ -190,7 +210,7 @@ class BaseFileTransferrer(object):
 
 
 class OrbiFileTransferrer(BaseFileTransferrer):
-    def __init__(self, name, interval, logdir):
+    def __init__(self, name, interval, logdir, keyfile):
         super(OrbiFileTransferrer, self).__init__(name, interval, logdir)
         self.acquisition_start = 'Raw file created, actual name'
         self.acquisition_stop = 'Closed raw file'
@@ -237,10 +257,11 @@ class OrbiFileTransferrer(BaseFileTransferrer):
 
 
 class QExactiveFileTransferrer(BaseFileTransferrer):
-    def __init__(self, name, interval, logdir):
+    def __init__(self, name, interval, logdir, keyfile):
         super(QExactiveFileTransferrer, self).__init__(name, interval, logdir)
         self.acquisition_start = 'Starting acquisition'
         self.acquisition_stop = 'MS acquisition end. Accumulated MS size'
+        self.keyfile = keyfile
 
     def read_log(self):
         self.machine_log = []
