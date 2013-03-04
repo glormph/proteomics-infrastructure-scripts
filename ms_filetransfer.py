@@ -11,10 +11,14 @@ ch.setFormatter(formatter)
 log.addHandler(fh)
 log.addHandler(ch)
 
+#FIXME there is no acquisition stop in orbi yet it is required for something
+# do we need to wait for it or is it enough without acqui stop?
+
 # initialize FIXME
 PATH_TO_LOG = os.path.join('C:\\', 'Thermo', 'Instruments', 'LTQ', 'system', 'logs')
 DATEFORMAT = '%Y%m%d'
 MAX_DAYS_IN_QUEUE = 5
+keyfile = 'C:\Program Files\ssh\keys\orbi.ppk'
 
 class BaseFileTransferrer(object):
     def __init__(self, name, interval, logdir):
@@ -126,7 +130,7 @@ class BaseFileTransferrer(object):
             if self.start in logline:
                 age = datetime.datetime.now() - timestamp
                 if age.days < MAX_DAYS_IN_QUEUE:
-                    fn = logline[logline.index('Starting acquisition: Xcalibur will write ')+42: logline.index(' (and may add date/time to the name)')]
+                    fn = self.get_filename_from_logline(logline)
                     if timestamp not in self.queue:
                         self.set_lastopened_timestamp(timestamp)
                         self.queue[timestamp] = {'file': fn}
@@ -160,7 +164,7 @@ class BaseFileTransferrer(object):
                     continue
                 try:
                     subprocess.check_call(['C:\Program Files\ssh\pscp.exe', '-i',
-                    'C:\Program Files\ssh\keys\orbi.ppk', fn,
+                    self.keyfile, fn,
                             'orbi@130.229.48.246:/mnt/datadrive/'])
                 except OSError:
                     log.error('Could not call pscp.exe in the specified location c:\program files. Exiting')
@@ -184,6 +188,7 @@ class OrbiFileTransferrer(BaseFileTransferrer):
         self.start = 'Raw file created, actual name'
         self.stop = 'Stopping acquisition -- this doesnt exist in orbi log'
         self.store = 'Closed raw file'
+        self.keyfile = keyfile
 
     def read_log(self):
         """read today and yesterday's logfile"""
