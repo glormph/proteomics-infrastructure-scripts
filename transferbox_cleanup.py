@@ -1,25 +1,16 @@
-import os, urllib2, urllib, cookielib, json, logging, datetime
-from lxml import html
+import os, logging, datetime
+import metadata_querying
 
 DATADIR = '/mnt/datadrive'
+LOGIN = 'http://localhost:8000/kantele/login'
+URL = 'http://localhost:8000/kantele/rawstatus'
 
 logging.basicConfig(filename='transfer_cleaning.log',level=logging.DEBUG, 
 	format='%(asctime)s - %(levelname)s - %(message)s')
-
 logging.info('Checking files to delete on transfer box...')
 
-cj = cookielib.CookieJar()
-opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cj))
-urllib2.install_opener(opener)
-
-doc = urllib2.urlopen('http://localhost:8000/kantele/login').read()
-token = html.fromstring(doc).xpath('//input[@name="csrfmiddlewaretoken"]/@value')[0]
-
-data = [('fn',x) for x in os.listdir(DATADIR)] 
-data.append(('csrfmiddlewaretoken', token))
-data = urllib.urlencode(data)
-response = urllib2.urlopen('http://localhost:8000/kantele/rawstatus/', data).read()
-response = json.loads(response)
+files = os.listdir(DATADIR)
+response = metadata_querying.query_rawfiles(files, URL, LOGIN)
 
 todelete = []
 for fn in response:
