@@ -99,8 +99,10 @@ class BaseFileTransferrer(object):
             self.lastopened_timestamp  = {}
             self.lastclosed_timestamp = {}
         else:
-            self.lastopened_timestamp = last['last_opened']
-            self.lastclosed_timestamp = last['last_closed']
+            self.lastopened_timestamp = datetime.datetime.strptime( \
+                    last['last_opened'], '%Y%m%d %H:%M:%S.%f')
+            self.lastclosed_timestamp = datetime.datetime.strptime( \
+                    last['last_closed'], '%Y%m%d %H:%M:%S.%f')
             log.info('Read last open/close file timestamps')
     
     def set_lastopened_timestamp(self, timestamp):
@@ -113,8 +115,10 @@ class BaseFileTransferrer(object):
 
     def save_timestamps(self):
         ts = {
-            'last_opened': self.lastopened_timestamp,
-            'last_closed': self.lastclosed_timestamp
+            'last_opened': datetime.datetime.strftime( \
+                self.lastopened_timestamp, '%Y%m%d %H:%M:%S.%f'),
+            'last_closed': datetime.datetime.strftime( \
+                self.lastclosed_timestamp, '%Y%m%d %H:%M:%S.%f')
             }
         try:
             with open('logrec.txt', 'w') as fp:
@@ -263,7 +267,7 @@ class QExactiveFileTransferrer(BaseFileTransferrer):
             for line in fp:
                 linetime = line[1:line.index(']')].split('=')[1].split('+')[0]
                 linetime = datetime.datetime.strptime(linetime, '%Y-%m-%d '
-                '%H:%M:%s.%f')
+                '%H:%M:%S.%f')
                 if linetime > self.lastclosed_timestamp:
                     self.machine_log.append( (linetime, line) )
 
